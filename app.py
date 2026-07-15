@@ -120,30 +120,18 @@ def pcap_to_flows(pcap_path):
         base, _ = os.path.splitext(pcap_path)
         csv_path = base + ".csv"
 
-        # Use python API with named arguments to bypass cicflowmeter CLI bug
-        from cicflowmeter.sniffer import create_sniffer
+        # Use pure python PcapReader and FlowSession to bypass Scapy's tcpdump requirement on Windows
+        from cicflowmeter.flow_session import FlowSession
+        from scapy.all import PcapReader
 
-        sniffer, session = create_sniffer(
-            input_file=pcap_path,
-            input_interface=None,
-            output_mode="csv",
-            output=csv_path,
-            input_directory=None,
-            fields=None,
-            verbose=False
-        )
-
-        sniffer.start()
+        session = FlowSession(output_mode="csv", output=csv_path)
 
         try:
-            sniffer.join()
-        except KeyboardInterrupt:
-            sniffer.stop()
+            for pkt in PcapReader(pcap_path):
+                # Only process IP and (TCP or UDP) packets
+                if pkt.haslayer("IP") and (pkt.haslayer("TCP") or pkt.haslayer("UDP")):
+                    session.process(pkt)
         finally:
-            if hasattr(session, "_gc_stop"):
-                session._gc_stop.set()
-                session._gc_thread.join(timeout=2.0)
-            sniffer.join()
             session.flush_flows()
 
         if not os.path.exists(csv_path):
