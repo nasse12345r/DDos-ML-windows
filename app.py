@@ -4,9 +4,11 @@ import threading
 import time
 import os
 import queue
+import shutil
 import subprocess
 import tempfile
 import os
+import sys
 
 # Fix OpenBLAS memory allocation issue on Windows
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
@@ -122,28 +124,34 @@ def pcap_to_flows(pcap_path):
 
         # Invoke cicflowmeter CLI via subprocess
         # cicflowmeter -f <input_pcap> -c <output_csv>
-        proc = subprocess.run(
-            ['cicflowmeter', '-f', pcap_path, '-c', csv_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE
-        )
+        cic_path = shutil.which('cicflowmeter')
 
-        if proc.returncode != 0:
-            logger.error(f"cicflowmeter error: {proc.stderr.decode()}")
+        # 2. If it's not in PATH, dynamically find their Python Scripts folder
+        if cic_path is None:
+            if os.name == 'nt':  # If the user is on Windows
+                cic_path = os.path.join(os.path.dirname(sys.executable), 'Scripts', 'cicflowmeter.exe')
+            else:  # If the user is on Linux or Mac
+                cic_path = os.path.join(os.path.dirname(sys.executable), 'cicflowmeter')
+        
+        # 3. Run the subprocess and capture the output (using stderr=subprocess.PIPE to catch errors)
+        result = subprocess.run([cic_path, '-f', pcap_path, '-c', csv_path], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+        if result.returncode != 0:
+            logger.error(f"cicflowmeter error: {result.stderr.decode('utf-8', errors='ignore')}")
             return None, csv_path
-
+            
         if not os.path.exists(csv_path):
             return None, csv_path
-
+            
         # Read the generated CSV
         df = pd.read_csv(csv_path)
-
+        
         # Strip leading/trailing spaces from column names
         df.columns = df.columns.str.strip()
 
         if df is None or len(df) == 0:
             return None, csv_path
-
+            
         return df, csv_path
 
     except Exception as e:
