@@ -1,0 +1,8 @@
+flask==3.0.0
+flask-socketio==5.3.6
+joblib==1.5.3
+pandas==3.0.3
+numpy==2.5.1
+nfstream==6.6.0
+scikit-learn==1.9.0
+xgboost==3.3.0

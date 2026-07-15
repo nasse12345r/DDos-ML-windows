@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FYP DDoS Detection Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkbg: '#0f172a',
+                        cardbg: '#1e293b'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .terminal-scroll {
+            scrollbar-width: thin;
+            scrollbar-color: #4b5563 #1e293b;
+        }
+        .pulse-red {
+            animation: pulse-red 2s infinite;
+        }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+    </style>
+</head>
+<body class="bg-darkbg text-gray-200 font-sans min-h-screen">
+
+    <!-- Navbar -->
+    <nav class="bg-cardbg border-b border-gray-700 p-4 sticky top-0 z-50 shadow-md">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                <h1 class="text-xl font-bold text-white tracking-wider">FYP <span class="text-blue-500">IDS Dashboard</span></h1>
+            </div>
+            <div id="status-badge" class="px-3 py-1 rounded-full text-sm font-semibold bg-gray-600 text-gray-200 flex items-center">
+                <span class="w-2 h-2 rounded-full bg-gray-400 mr-2" id="status-dot"></span>
+                <span id="status-text">OFFLINE</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto p-4 md:p-6 lg:p-8">
+
+        <!-- Top Controls & Status Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-6 mb-6">
+
+            <!-- Controls -->
+            <div class="col-span-1 md:grid-cols-1 md:col-span-3 bg-cardbg rounded-xl p-5 shadow-lg border border-gray-800">
+                <h2 class="text-lg font-semibold mb-4 text-white">System Controls</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Network Interface</label>
+                        <input type="text" id="interface" value="{{ interface }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Capture Time (sec)</label>
+                        <input type="number" id="capture_time" value="{{ capture_time }}" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div class="flex space-x-2 pt-2">
+                        <button id="btn-start" onclick="startIDS()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded font-medium transition duration-200">Start</button>
+                        <button id="btn-stop" onclick="stopIDS()" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded font-medium transition duration-200 opacity-50 cursor-not-allowed" disabled>Stop</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="col-span-1 md:col-span-9 grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div class="bg-cardbg rounded-xl p-5 shadow-lg border border-gray-800 flex flex-col justify-center items-center relative overflow-hidden group">
+                    <div class="absolute inset-0 bg-blue-500 opacity-5 group-hover:opacity-10 transition duration-300"></div>
+                    <p class="text-sm text-gray-400 font-medium uppercase tracking-wider mb-1">Current Cycle</p>
+                    <p class="text-5xl font-bold text-white" id="stat-cycle">0</p>
+                </div>
+                <div class="bg-cardbg rounded-xl p-5 shadow-lg border border-gray-800 flex flex-col justify-center items-center relative overflow-hidden group">
+                    <div class="absolute inset-0 bg-purple-500 opacity-5 group-hover:opacity-10 transition duration-300"></div>
+                    <p class="text-sm text-gray-400 font-medium uppercase tracking-wider mb-1">Total Flows</p>
+                    <p class="text-5xl font-bold text-white" id="stat-flows">0</p>
+                </div>
+                <div id="verdict-card" class="bg-cardbg rounded-xl p-5 shadow-lg border border-gray-800 flex flex-col justify-center items-center relative overflow-hidden transition-all duration-500">
+                    <p class="text-sm text-gray-400 font-medium uppercase tracking-wider mb-2 z-10 relative">System Verdict</p>
+                    <p class="text-lg text-center font-bold text-green-400 z-10 relative" id="stat-verdict">Awaiting Data...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Chart -->
+        <div class="bg-cardbg rounded-xl p-5 shadow-lg border border-gray-800 mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold text-white">Live Traffic & Threat Analysis</h2>
+                <div class="flex items-center space-x-4 text-sm">
+                    <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-blue-500 mr-2"></span>Flows</div>
+                    <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-red-500 mr-2"></span>ML Flag %</div>
+                </div>
+            </div>
+            <div class="relative h-[300px] w-full">
+                <canvas id="mainChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Terminal Output -->
+        <div class="bg-cardbg rounded-xl p-0 shadow-lg border border-gray-800 overflow-hidden">
+            <div class="bg-gray-800 px-4 py-2 border-b border-gray-700 flex items-center">
+                <div class="flex space-x-2">
+                    <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                </div>
+                <p class="text-xs text-gray-400 font-mono ml-4">ids_alerts.log</p>
+            </div>
+            <div id="terminal" class="p-4 h-64 overflow-y-auto font-mono text-sm text-gray-300 terminal-scroll bg-[#0f172a]">
+                <div class="text-gray-500 italic">> Waiting for system to start...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- WebSockets Setup ---
+        const socket = io();
+
+        socket.on('connect', () => {
+            console.log('Connected to WebSocket');
+            checkStatus();
+        });
+
+        // --- Chart.js Setup ---
+        const ctx = document.getElementById('mainChart').getContext('2d');
+        const mainChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Network Flows',
+                        data: [],
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        yAxisID: 'y',
+                        fill: true
+                    },
+                    {
+                        label: 'ML Flag % (Random Forest)',
+                        data: [],
+                        borderColor: '#ef4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        yAxisID: 'y1',
+                        fill: false
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#1e293b',
+                        titleColor: '#e2e8f0',
+                        bodyColor: '#cbd5e1',
+                        borderColor: '#334155',
+                        borderWidth: 1
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: '#334155', drawBorder: false },
+                        ticks: { color: '#94a3b8' }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: { display: true, text: 'Number of Flows', color: '#94a3b8' },
+                        grid: { color: '#334155', drawBorder: false },
+                        ticks: { color: '#94a3b8' },
+                        beginAtZero: true
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: { display: true, text: 'ML Flag %', color: '#94a3b8' },
+                        grid: { drawOnChartArea: false },
+                        ticks: { color: '#94a3b8' },
+                        min: 0,
+                        max: 100
+                    }
+                }
+            }
+        });
+
+        // --- Data Handling ---
+        const maxDataPoints = 20;
+
+        socket.on('update_stats', (data) => {
+            // Update Text Stats
+            document.getElementById('stat-cycle').innerText = data.cycle;
+            document.getElementById('stat-flows').innerText = data.total_flows.toLocaleString();
+
+            const verdictEl = document.getElementById('stat-verdict');
+            const verdictCard = document.getElementById('verdict-card');
+
+            verdictEl.innerText = data.verdict;
+
+            // Handle Status UI Changes
+            verdictCard.classList.remove('pulse-red', 'border-red-500', 'border-yellow-500', 'border-gray-800');
+            verdictEl.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400');
+
+            if (data.status === 'danger') {
+                verdictCard.classList.add('pulse-red', 'border-red-500');
+                verdictEl.classList.add('text-red-400');
+            } else if (data.status === 'warning') {
+                verdictCard.classList.add('border-yellow-500');
+                verdictEl.classList.add('text-yellow-400');
+            } else {
+                verdictCard.classList.add('border-gray-800');
+                verdictEl.classList.add('text-green-400');
+            }
+
+            // Update Chart
+            if (mainChart.data.labels.length > maxDataPoints) {
+                mainChart.data.labels.shift();
+                mainChart.data.datasets[0].data.shift();
+                mainChart.data.datasets[1].data.shift();
+            }
+
+            mainChart.data.labels.push(data.timestamp);
+            mainChart.data.datasets[0].data.push(data.total_flows);
+            mainChart.data.datasets[1].data.push(data.rf_percent);
+            mainChart.update();
+        });
+
+        socket.on('log', (data) => {
+            const terminal = document.getElementById('terminal');
+            const div = document.createElement('div');
+            div.className = 'mb-1';
+
+            let colorClass = 'text-gray-300';
+            if (data.level === 'CRITICAL' || data.level === 'ERROR') colorClass = 'text-red-400 font-bold';
+            if (data.level === 'WARNING') colorClass = 'text-yellow-400';
+
+            // Prevent XSS by using textContent for user data
+            const timestampSpan = document.createElement('span');
+            timestampSpan.className = 'text-gray-500';
+            timestampSpan.textContent = `[${data.timestamp}] `;
+
+            const messageSpan = document.createElement('span');
+            messageSpan.className = colorClass;
+            messageSpan.textContent = data.message;
+
+            div.appendChild(timestampSpan);
+            div.appendChild(messageSpan);
+            terminal.appendChild(div);
+            terminal.scrollTop = terminal.scrollHeight;
+        });
+
+        // --- Controls ---
+        function checkStatus() {
+            fetch('/api/status')
+                .then(res => res.json())
+                .then(data => {
+                    updateUIState(data.is_running);
+                });
+        }
+
+        function startIDS() {
+            const iface = document.getElementById('interface').value;
+            const time = document.getElementById('capture_time').value;
+
+            fetch('/api/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ interface: iface, capture_time: time })
+            }).then(() => checkStatus());
+        }
+
+        function stopIDS() {
+            fetch('/api/stop', { method: 'POST' }).then(() => checkStatus());
+        }
+
+        function updateUIState(isRunning) {
+            const btnStart = document.getElementById('btn-start');
+            const btnStop = document.getElementById('btn-stop');
+            const statusText = document.getElementById('status-text');
+            const statusDot = document.getElementById('status-dot');
+            const statusBadge = document.getElementById('status-badge');
+
+            if (isRunning) {
+                btnStart.disabled = true;
+                btnStart.classList.add('opacity-50', 'cursor-not-allowed');
+                btnStop.disabled = false;
+                btnStop.classList.remove('opacity-50', 'cursor-not-allowed');
+
+                statusText.innerText = "ONLINE - MONITORING";
+                statusBadge.classList.replace('bg-gray-600', 'bg-blue-900');
+                statusBadge.classList.replace('text-gray-200', 'text-blue-100');
+                statusDot.classList.replace('bg-gray-400', 'bg-blue-400');
+                statusDot.classList.add('animate-pulse');
+            } else {
+                btnStart.disabled = false;
+                btnStart.classList.remove('opacity-50', 'cursor-not-allowed');
+                btnStop.disabled = true;
+                btnStop.classList.add('opacity-50', 'cursor-not-allowed');
+
+                statusText.innerText = "OFFLINE";
+                statusBadge.classList.replace('bg-blue-900', 'bg-gray-600');
+                statusBadge.classList.replace('text-blue-100', 'text-gray-200');
+                statusDot.classList.replace('bg-blue-400', 'bg-gray-400');
+                statusDot.classList.remove('animate-pulse');
+            }
+        }
+
+        // Initial Check
+        checkStatus();
+        setInterval(checkStatus, 5000); // Polling backup
+    </script>
+</body>
+</html>
