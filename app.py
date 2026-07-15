@@ -111,128 +111,47 @@ def capture_traffic(cycle):
         return None
 
 def pcap_to_flows(pcap_path):
-    """Convert pcap to flow features using NFStream"""
+    """Convert pcap to flow features using cicflowmeter CLI"""
     try:
         if not os.path.exists(pcap_path):
-            return None
+            return None, None
             
-        # Lazy-load NFStreamer to prevent memory exhaustion (Page File errors) on Windows startup
-        from nfstream import NFStreamer
+        # Generate temporary CSV path
+        base, _ = os.path.splitext(pcap_path)
+        csv_path = base + ".csv"
 
-        # n_meters=1 disables multiprocessing in NFStream, which prevents memory spikes and process locks on Windows
-        streamer = NFStreamer(
-            source=pcap_path,
-            statistical_analysis=True,
-            splt_analysis=0,
-            n_meters=1
+        # Invoke cicflowmeter CLI via subprocess
+        # cicflowmeter -f <input_pcap> -c <output_csv>
+        proc = subprocess.run(
+            ['cicflowmeter', '-f', pcap_path, '-c', csv_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE
         )
-        df = streamer.to_pandas()
+
+        if proc.returncode != 0:
+            logger.error(f"cicflowmeter error: {proc.stderr.decode()}")
+            return None, csv_path
+
+        if not os.path.exists(csv_path):
+            return None, csv_path
+
+        # Read the generated CSV
+        df = pd.read_csv(csv_path)
+
+        # Strip leading/trailing spaces from column names
+        df.columns = df.columns.str.strip()
 
         if df is None or len(df) == 0:
-            return None
-        return df
+            return None, csv_path
+
+        return df, csv_path
 
     except Exception as e:
         logger.error(f"Flow extraction error: {e}")
-        return None
+        return None, locals().get('csv_path', None)
 
 def preprocess_flows(df):
-    """Map NFStream columns to match training features and approximate missing ones"""
-    col_map = {
-        'protocol':                      'Protocol',
-        'bidirectional_duration_ms':     'Flow Duration',
-        'src2dst_packets':               'Total Fwd Packets',
-        'dst2src_packets':               'Total Backward Packets',
-        'src2dst_bytes':                 'Total Length of Fwd Packets',
-        'dst2src_bytes':                 'Total Length of Bwd Packets',
-        'src2dst_max_ps':                'Fwd Packet Length Max',
-        'src2dst_min_ps':                'Fwd Packet Length Min',
-        'src2dst_mean_ps':               'Fwd Packet Length Mean',
-        'src2dst_stddev_ps':             'Fwd Packet Length Std',
-        'dst2src_max_ps':                'Bwd Packet Length Max',
-        'dst2src_min_ps':                'Bwd Packet Length Min',
-        'dst2src_mean_ps':               'Bwd Packet Length Mean',
-        'dst2src_stddev_ps':             'Bwd Packet Length Std',
-        'bidirectional_mean_ps':         'Packet Length Mean',
-        'bidirectional_stddev_ps':       'Packet Length Std',
-        'bidirectional_max_ps':          'Max Packet Length',
-        'bidirectional_min_ps':          'Min Packet Length',
-        'src2dst_mean_piat_ms':          'Fwd IAT Mean',
-        'src2dst_stddev_piat_ms':        'Fwd IAT Std',
-        'src2dst_max_piat_ms':           'Fwd IAT Max',
-        'src2dst_min_piat_ms':           'Fwd IAT Min',
-        'dst2src_mean_piat_ms':          'Bwd IAT Mean',
-        'dst2src_stddev_piat_ms':        'Bwd IAT Std',
-        'dst2src_max_piat_ms':           'Bwd IAT Max',
-        'dst2src_min_piat_ms':           'Bwd IAT Min',
-        'bidirectional_mean_piat_ms':    'Flow IAT Mean',
-        'bidirectional_stddev_piat_ms':  'Flow IAT Std',
-        'bidirectional_max_piat_ms':     'Flow IAT Max',
-        'bidirectional_min_piat_ms':     'Flow IAT Min',
-        'bidirectional_syn_packets':     'SYN Flag Count',
-        'bidirectional_fin_packets':     'FIN Flag Count',
-        'bidirectional_rst_packets':     'RST Flag Count',
-        'bidirectional_psh_packets':     'PSH Flag Count',
-        'bidirectional_ack_packets':     'ACK Flag Count',
-        'bidirectional_urg_packets':     'URG Flag Count',
-        'bidirectional_ece_packets':     'ECE Flag Count',
-        'bidirectional_cwr_packets':     'CWE Flag Count',
-        'src2dst_syn_packets':           'Fwd PSH Flags',
-        'src2dst_fin_packets':           'Fwd URG Flags',
-        'dst2src_syn_packets':           'Bwd PSH Flags',
-        'dst2src_fin_packets':           'Bwd URG Flags',
-        'src2dst_duration_ms':           'Fwd IAT Total',
-        'dst2src_duration_ms':           'Bwd IAT Total',
-        'bidirectional_packets':         'Subflow Fwd Packets',
-        'bidirectional_bytes':           'Subflow Fwd Bytes',
-    }
-
-    df = df.rename(columns=col_map)
-    duration_s = df['Flow Duration'] / 1000.0  # ms to seconds
-
-    safe_duration = duration_s.replace(0, np.nan)
-    df['Flow Bytes/s'] = ((df['Total Length of Fwd Packets'] + df['Total Length of Bwd Packets']) / safe_duration).fillna(0)
-    df['Flow Packets/s'] = ((df['Total Fwd Packets'] + df['Total Backward Packets']) / safe_duration).fillna(0)
-    df['Fwd Packets/s'] = (df['Total Fwd Packets'] / safe_duration).fillna(0)
-    df['Bwd Packets/s'] = (df['Total Backward Packets'] / safe_duration).fillna(0)
-
-    df['Packet Length Variance'] = df['Packet Length Std'] ** 2
-
-    total_pkts = df['Total Fwd Packets'] + df['Total Backward Packets']
-    safe_total_pkts = total_pkts.replace(0, np.nan)
-    df['Average Packet Size'] = ((df['Total Length of Fwd Packets'] + df['Total Length of Bwd Packets']) / safe_total_pkts).fillna(0)
-
-    df['Avg Fwd Segment Size'] = df['Fwd Packet Length Mean']
-    df['Avg Bwd Segment Size'] = df['Bwd Packet Length Mean']
-    df['Fwd Header Length']   = df['Total Fwd Packets'] * 20
-    df['Bwd Header Length']   = df['Total Backward Packets'] * 20
-    df['Fwd Header Length.1'] = df['Fwd Header Length']
-    df['Subflow Bwd Packets'] = df['Total Backward Packets']
-    df['Subflow Bwd Bytes']   = df['Total Length of Bwd Packets']
-    
-    safe_fwd_pkts = df['Total Fwd Packets'].replace(0, np.nan)
-    df['Down/Up Ratio'] = (df['Total Backward Packets'] / safe_fwd_pkts).fillna(0)
-
-    # Approximations for missing features
-    df['Init_Win_bytes_forward'] = df['Total Fwd Packets'] * 29200 
-    df['Init_Win_bytes_backward'] = df['Total Backward Packets'] * 29200
-    df['act_data_pkt_fwd'] = df['Total Fwd Packets']
-    df['min_seg_size_forward'] = 20 
-    df['Idle Mean'] = df['Flow IAT Mean']
-    df['Idle Std'] = df['Flow IAT Std']
-    df['Idle Max'] = df['Flow IAT Max']
-    df['Idle Min'] = df['Flow IAT Min']
-    df['Active Mean'] = 0
-    df['Active Std'] = 0
-    df['Active Max'] = 0
-    df['Active Min'] = 0
-    df['Inbound'] = 1 
-    
-    missing_cols = ['Fwd Avg Bytes/Bulk', 'Fwd Avg Packets/Bulk', 'Fwd Avg Bulk Rate',
-                    'Bwd Avg Bytes/Bulk', 'Bwd Avg Packets/Bulk', 'Bwd Avg Bulk Rate']
-    missing_df = pd.DataFrame(0, index=df.index, columns=missing_cols)
-    df = pd.concat([df, missing_df], axis=1)
-
+    """Process cicflowmeter columns to match training features and handle missing values/infinities"""
     final_df = pd.DataFrame()
     
     if features is None:
@@ -335,8 +254,9 @@ def analysis_worker():
                 continue
                 
             logger.info(f"Starting analysis for Cycle {cycle}")
+            csv_path = None
             try:
-                raw_df = pcap_to_flows(pcap_path)
+                raw_df, csv_path = pcap_to_flows(pcap_path)
                 if raw_df is not None:
                     df = preprocess_flows(raw_df.copy())
                     detect(df, cycle)
@@ -354,6 +274,11 @@ def analysis_worker():
                 if pcap_path and os.path.exists(pcap_path):
                     try:
                         os.remove(pcap_path)
+                    except Exception:
+                        pass
+                if csv_path and os.path.exists(csv_path):
+                    try:
+                        os.remove(csv_path)
                     except Exception:
                         pass
                 analysis_queue.task_done()
