@@ -4,9 +4,11 @@ import threading
 import time
 import os
 import queue
+import shutil
 import subprocess
 import tempfile
 import os
+import sys
 
 # Fix OpenBLAS memory allocation issue on Windows
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
@@ -136,16 +138,16 @@ def pcap_to_flows(pcap_path):
 
         if not os.path.exists(csv_path):
             return None, csv_path
-
+            
         # Read the generated CSV
         df = pd.read_csv(csv_path)
-
+        
         # Strip leading/trailing spaces from column names
         df.columns = df.columns.str.strip()
 
         if df is None or len(df) == 0:
             return None, csv_path
-
+            
         return df, csv_path
 
     except Exception as e:
