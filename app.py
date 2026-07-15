@@ -122,24 +122,20 @@ def pcap_to_flows(pcap_path):
         base, _ = os.path.splitext(pcap_path)
         csv_path = base + ".csv"
 
-        # Invoke cicflowmeter CLI via subprocess
-        # cicflowmeter -f <input_pcap> -c <output_csv>
-        cic_path = shutil.which('cicflowmeter')
+        # Use pure python PcapReader and FlowSession to bypass Scapy's tcpdump requirement on Windows
+        from cicflowmeter.flow_session import FlowSession
+        from scapy.all import PcapReader
 
-        # 2. If it's not in PATH, dynamically find their Python Scripts folder
-        if cic_path is None:
-            if os.name == 'nt':  # If the user is on Windows
-                cic_path = os.path.join(os.path.dirname(sys.executable), 'Scripts', 'cicflowmeter.exe')
-            else:  # If the user is on Linux or Mac
-                cic_path = os.path.join(os.path.dirname(sys.executable), 'cicflowmeter')
-        
-        # 3. Run the subprocess and capture the output (using stderr=subprocess.PIPE to catch errors)
-        result = subprocess.run([cic_path, '-f', pcap_path, '-c', csv_path], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        session = FlowSession(output_mode="csv", output=csv_path)
 
-        if result.returncode != 0:
-            logger.error(f"cicflowmeter error: {result.stderr.decode('utf-8', errors='ignore')}")
-            return None, csv_path
-            
+        try:
+            for pkt in PcapReader(pcap_path):
+                # Only process IP and (TCP or UDP) packets
+                if pkt.haslayer("IP") and (pkt.haslayer("TCP") or pkt.haslayer("UDP")):
+                    session.process(pkt)
+        finally:
+            session.flush_flows()
+
         if not os.path.exists(csv_path):
             return None, csv_path
             
