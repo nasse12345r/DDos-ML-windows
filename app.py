@@ -120,17 +120,31 @@ def pcap_to_flows(pcap_path):
         base, _ = os.path.splitext(pcap_path)
         csv_path = base + ".csv"
 
-        # Invoke cicflowmeter CLI via subprocess
-        # cicflowmeter -f <input_pcap> -c <output_csv>
-        proc = subprocess.run(
-            ['cicflowmeter', '-f', pcap_path, '-c', csv_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE
+        # Use python API with named arguments to bypass cicflowmeter CLI bug
+        from cicflowmeter.sniffer import create_sniffer
+
+        sniffer, session = create_sniffer(
+            input_file=pcap_path,
+            input_interface=None,
+            output_mode="csv",
+            output=csv_path,
+            input_directory=None,
+            fields=None,
+            verbose=False
         )
 
-        if proc.returncode != 0:
-            logger.error(f"cicflowmeter error: {proc.stderr.decode()}")
-            return None, csv_path
+        sniffer.start()
+
+        try:
+            sniffer.join()
+        except KeyboardInterrupt:
+            sniffer.stop()
+        finally:
+            if hasattr(session, "_gc_stop"):
+                session._gc_stop.set()
+                session._gc_thread.join(timeout=2.0)
+            sniffer.join()
+            session.flush_flows()
 
         if not os.path.exists(csv_path):
             return None, csv_path
