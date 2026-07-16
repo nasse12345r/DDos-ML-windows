@@ -128,15 +128,22 @@ def pcap_to_flows(pcap_path):
 
         session = FlowSession(output_mode="csv", output=csv_path)
 
+        total_packets = 0
+        tcp_udp_packets = 0
         try:
             for pkt in PcapReader(pcap_path):
+                total_packets += 1
                 # Only process IP and (TCP or UDP) packets
                 if pkt.haslayer("IP") and (pkt.haslayer("TCP") or pkt.haslayer("UDP")):
+                    tcp_udp_packets += 1
                     session.process(pkt)
         finally:
             session.flush_flows()
 
+        logger.info(f"DEBUG PCAP: {pcap_path} contained {total_packets} total packets. {tcp_udp_packets} were TCP/UDP.")
+
         if not os.path.exists(csv_path):
+            logger.warning(f"DEBUG PCAP: CSV file was not generated at {csv_path}")
             return None, csv_path
 
         # Read the generated CSV
@@ -144,6 +151,8 @@ def pcap_to_flows(pcap_path):
 
         # Strip leading/trailing spaces from column names
         df.columns = df.columns.str.strip()
+
+        logger.info(f"DEBUG PCAP: CSV generated with {len(df)} flow rows.")
 
         if df is None or len(df) == 0:
             return None, csv_path
