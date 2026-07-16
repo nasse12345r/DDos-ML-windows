@@ -247,6 +247,20 @@ def preprocess_flows(df):
 
     df = df.rename(columns=col_map)
 
+    # The Python cicflowmeter outputs time in seconds, but the ML models (trained on CIC-DDoS2019)
+    # expect time features to be in microseconds.
+    time_cols = [
+        'Flow Duration', 'Flow IAT Mean', 'Flow IAT Std', 'Flow IAT Max', 'Flow IAT Min',
+        'Fwd IAT Total', 'Fwd IAT Mean', 'Fwd IAT Std', 'Fwd IAT Max', 'Fwd IAT Min',
+        'Bwd IAT Total', 'Bwd IAT Mean', 'Bwd IAT Std', 'Bwd IAT Max', 'Bwd IAT Min',
+        'Active Mean', 'Active Std', 'Active Max', 'Active Min',
+        'Idle Mean', 'Idle Std', 'Idle Max', 'Idle Min'
+    ]
+
+    for tc in time_cols:
+        if tc in df.columns:
+            df[tc] = df[tc] * 1000000.0
+
     # Custom dataset additions
     if 'Fwd Header Length' in df.columns:
         df['Fwd Header Length.1'] = df['Fwd Header Length']
@@ -312,10 +326,10 @@ def detect(df, cycle):
     
     if high_confidence and enough_data:
         status = "danger"
-        verdict = f"DDoS ATTACK DETECTED! ({rf_ratio:.1%} of flows flagged)"
+        verdict = f"DDoS ATTACK DETECTED! (RF: {rf_ratio:.1%} | XGB: {xgb_ratio:.1%} | ISO: {iso_ratio:.1%} flagged)"
     elif supervised_alert and enough_data:
         status = "warning"
-        verdict = f"SUSPICIOUS TRAFFIC ({rf_ratio:.1%} of flows flagged)"
+        verdict = f"SUSPICIOUS TRAFFIC (RF: {rf_ratio:.1%} | XGB: {xgb_ratio:.1%} | ISO: {iso_ratio:.1%} flagged)"
     elif not enough_data:
         verdict = f"BENIGN (Insufficient flows: {total})"
         
