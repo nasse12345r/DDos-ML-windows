@@ -100,7 +100,9 @@
                 <h2 class="text-lg font-semibold text-white">Live Traffic & Threat Analysis</h2>
                 <div class="flex items-center space-x-4 text-sm">
                     <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-blue-500 mr-2"></span>Flows</div>
-                    <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-red-500 mr-2"></span>ML Flag %</div>
+                    <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-red-500 mr-2"></span>RF %</div>
+                    <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-yellow-500 mr-2"></span>XGB %</div>
+                    <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-green-500 mr-2"></span>ISO %</div>
                 </div>
             </div>
             <div class="relative h-[300px] w-full">
@@ -155,6 +157,26 @@
                         data: [],
                         borderColor: '#ef4444',
                         backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        yAxisID: 'y1',
+                        fill: false
+                    },
+                    {
+                        label: 'ML Flag % (XGBoost)',
+                        data: [],
+                        borderColor: '#f59e0b', // Yellow
+                        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        yAxisID: 'y1',
+                        fill: false
+                    },
+                    {
+                        label: 'ML Flag % (Isolation Forest)',
+                        data: [],
+                        borderColor: '#10b981', // Green
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
                         borderWidth: 2,
                         tension: 0.4,
                         yAxisID: 'y1',
@@ -240,11 +262,15 @@
                 mainChart.data.labels.shift();
                 mainChart.data.datasets[0].data.shift();
                 mainChart.data.datasets[1].data.shift();
+                mainChart.data.datasets[2].data.shift();
+                mainChart.data.datasets[3].data.shift();
             }
 
             mainChart.data.labels.push(data.timestamp);
             mainChart.data.datasets[0].data.push(data.total_flows);
             mainChart.data.datasets[1].data.push(data.rf_percent);
+            mainChart.data.datasets[2].data.push(data.xgb_percent);
+            mainChart.data.datasets[3].data.push(data.iso_percent);
             mainChart.update();
         });
 

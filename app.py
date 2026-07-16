@@ -317,8 +317,9 @@ def detect(df, cycle):
     min_flows = 10 # Lowered slightly to show small bursts on UI
     enough_data = total >= min_flows
 
-    supervised_alert = rf_ratio >= 0.30 and xgb_ratio >= 0.30 and enough_data
-    high_confidence = rf_ratio >= 0.60 and xgb_ratio >= 0.60 and enough_data
+    # Increased thresholds to reduce false positives on live traffic
+    supervised_alert = rf_ratio >= 0.50 and xgb_ratio >= 0.50 and enough_data
+    high_confidence = rf_ratio >= 0.75 and xgb_ratio >= 0.75 and enough_data
     
     # Determine Final Verdict
     status = "normal"
