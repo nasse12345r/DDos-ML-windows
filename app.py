@@ -4,11 +4,9 @@ import threading
 import time
 import os
 import queue
-import shutil
 import subprocess
 import tempfile
 import os
-import sys
 
 # Fix OpenBLAS memory allocation issue on Windows
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
@@ -19,6 +17,7 @@ import pandas as pd
 import joblib
 import sklearn
 import xgboost
+import xgboost as xgb_module
 import logging
 import warnings
 
@@ -57,7 +56,8 @@ def load_models():
     try:
         logger.info("Loading models...")
         rf       = joblib.load(os.path.join(MODEL_PATH, 'random_forest.pkl'))
-        xgb      = joblib.load(os.path.join(MODEL_PATH, 'xgboost.pkl'))
+        xgb = xgb_module.XGBClassifier()
+        xgb.load_model(os.path.join(MODEL_PATH, 'xgboost_model.json'))
         iso      = joblib.load(os.path.join(MODEL_PATH, 'isolation_forest.pkl'))
         scaler   = joblib.load(os.path.join(MODEL_PATH, 'scaler.pkl'))
         features = joblib.load(os.path.join(MODEL_PATH, 'feature_names.pkl'))
@@ -65,7 +65,7 @@ def load_models():
     except Exception as e:
         logger.error(f"Failed to load models: {e}")
         # Debugging aid for corrupted files
-        for model_file in ['random_forest.pkl', 'xgboost.pkl', 'isolation_forest.pkl', 'scaler.pkl', 'feature_names.pkl']:
+        for model_file in ['random_forest.pkl', 'xgboost_model.json', 'isolation_forest.pkl', 'scaler.pkl', 'feature_names.pkl']:
             path = os.path.join(MODEL_PATH, model_file)
             if os.path.exists(path):
                 size = os.path.getsize(path)
@@ -127,7 +127,7 @@ def pcap_to_flows(pcap_path):
         from scapy.all import PcapReader
 
         session = FlowSession(output_mode="csv", output=csv_path)
-
+        
         try:
             for pkt in PcapReader(pcap_path):
                 # Only process IP and (TCP or UDP) packets
@@ -135,7 +135,7 @@ def pcap_to_flows(pcap_path):
                     session.process(pkt)
         finally:
             session.flush_flows()
-
+            
         if not os.path.exists(csv_path):
             return None, csv_path
             
